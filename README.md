@@ -203,8 +203,8 @@
 ## 4. Схема взаимодействий
 
 ### 4.1. Архитектурная схема системы (Контейнерный уровень)
-Исходник диаграммы в формате Draw.io: [architecture.drawio](file:///a:/laba_micro/docs/architecture.drawio)  
-Экспорт схемы в формате PNG: [architecture.png](file:///a:/laba_micro/docs/architecture.png)
+Исходник диаграммы в формате Draw.io: [architecture.drawio](docs/architecture.drawio)  
+Экспорт схемы в формате PNG: [architecture.png](docs/architecture.png)
 
 ![Архитектура цирковой микросервисной системы](docs/architecture.png)
 
@@ -236,8 +236,8 @@
 ---
 
 ### 4.3. Диаграмма последовательности: Успешный сценарий (Happy Path)
-Исходник диаграммы в формате Draw.io: [sequence-diagrams.drawio](file:///a:/laba_micro/docs/sequence-diagrams.drawio)  
-Экспорт схемы в формате PNG: [sequence-success.png](file:///a:/laba_micro/docs/sequence-success.png)
+Исходник диаграммы в формате Draw.io: [sequence-diagrams.drawio](docs/sequence-diagrams.drawio)  
+Экспорт схемы в формате PNG: [sequence-success.png](docs/sequence-success.png)
 
 ![Успешная покупка билета](docs/sequence-success.png)
 
@@ -259,7 +259,7 @@
 ---
 
 ### 4.4. Диаграмма последовательности: Сценарии сбоев и сага-компенсации
-Экспорт схемы в формате PNG: [sequence-failure.png](file:///a:/laba_micro/docs/sequence-failure.png)
+Экспорт схемы в формате PNG: [sequence-failure.png](docs/sequence-failure.png)
 
 ![Сценарии сбоев и компенсаций](docs/sequence-failure.png)
 
@@ -283,16 +283,16 @@
 
 | Топик Kafka | Событие (`eventType`) | Издатель | Подписчики | Ключ партиционирования | Ссылка на схему |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `circus.payments.events` | `payment.completed` | `payment-service` | `booking-service`, `loyalty-service` | `bookingId` | [payment-service.yaml#PaymentCompletedEvent](file:///a:/laba_micro/api/payment-service.yaml) |
-| `circus.payments.events` | `payment.failed` | `payment-service` | `booking-service` | `bookingId` | [payment-service.yaml#PaymentFailedEvent](file:///a:/laba_micro/api/payment-service.yaml) |
-| `circus.bookings.events` | `booking.confirmed` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingConfirmedEvent](file:///a:/laba_micro/api/booking-service.yaml) |
-| `circus.bookings.events` | `booking.expired` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingExpiredEvent](file:///a:/laba_micro/api/booking-service.yaml) |
-| `circus.bookings.events` | `booking.cancelled` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingCancelledEvent](file:///a:/laba_micro/api/booking-service.yaml) |
-| `circus.refunds.events` | `refund.requested` | `booking-service` | `payment-service`, `loyalty-service` | `bookingId` | [booking-service.yaml#TicketRefundRequestedEvent](file:///a:/laba_micro/api/booking-service.yaml) |
-| `circus.refunds.events` | `refund.completed` | `payment-service` | `booking-service`, `notification-service` | `bookingId` | [payment-service.yaml#RefundCompletedEvent](file:///a:/laba_micro/api/payment-service.yaml) |
-| `circus.loyalty.events` | `loyalty.points.accrued` | `loyalty-service` | `notification-service` | `userId` | [loyalty-service.yaml#PointsAccruedEvent](file:///a:/laba_micro/api/loyalty-service.yaml) |
-| `circus.loyalty.events` | `loyalty.tier.upgraded` | `loyalty-service` | `notification-service` | `userId` | [loyalty-service.yaml#TierUpgradedEvent](file:///a:/laba_micro/api/loyalty-service.yaml) |
-| `circus.catalog.events` | `catalog.show.created` | `catalog-service` | Внешние витрины, кэш | `showId` | [catalog-service.yaml#ShowCreatedEvent](file:///a:/laba_micro/api/catalog-service.yaml) |
+| `circus.payments.events` | `payment.completed` | `payment-service` | `booking-service`, `loyalty-service` | `bookingId` | [payment-service.yaml#PaymentCompletedEvent](api/payment-service.yaml) |
+| `circus.payments.events` | `payment.failed` | `payment-service` | `booking-service` | `bookingId` | [payment-service.yaml#PaymentFailedEvent](api/payment-service.yaml) |
+| `circus.bookings.events` | `booking.confirmed` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingConfirmedEvent](api/booking-service.yaml) |
+| `circus.bookings.events` | `booking.expired` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingExpiredEvent](api/booking-service.yaml) |
+| `circus.bookings.events` | `booking.cancelled` | `booking-service` | `loyalty-service`, `notification-service` | `bookingId` | [booking-service.yaml#BookingCancelledEvent](api/booking-service.yaml) |
+| `circus.refunds.events` | `refund.requested` | `booking-service` | `payment-service`, `loyalty-service` | `bookingId` | [booking-service.yaml#TicketRefundRequestedEvent](api/booking-service.yaml) |
+| `circus.refunds.events` | `refund.completed` | `payment-service` | `booking-service`, `notification-service` | `bookingId` | [payment-service.yaml#RefundCompletedEvent](api/payment-service.yaml) |
+| `circus.loyalty.events` | `loyalty.points.accrued` | `loyalty-service` | `notification-service` | `userId` | [loyalty-service.yaml#PointsAccruedEvent](api/loyalty-service.yaml) |
+| `circus.loyalty.events` | `loyalty.tier.upgraded` | `loyalty-service` | `notification-service` | `userId` | [loyalty-service.yaml#TierUpgradedEvent](api/loyalty-service.yaml) |
+| `circus.catalog.events` | `catalog.show.created` | `catalog-service` | Внешние витрины, кэш | `showId` | [catalog-service.yaml#ShowCreatedEvent](api/catalog-service.yaml) |
 
 ### Пример структуры доменного события: `payment.completed`
 ```json
@@ -319,8 +319,8 @@
 
 Все файлы спецификаций успешно прошли валидацию официальным линтером `openapi-spec-validator`:
 
-1. **[api/catalog-service.yaml](file:///a:/laba_micro/api/catalog-service.yaml)** — спецификация каталога цирковых шоу, сеансов, схем секторов и внутренних проверок наличия мест.
-2. **[api/booking-service.yaml](file:///a:/laba_micro/api/booking-service.yaml)** — спецификация создания броней, удержания мест, получения билетов с QR-кодами и инициации возвратов.
-3. **[api/payment-service.yaml](file:///a:/laba_micro/api/payment-service.yaml)** — спецификация инициализации платежей, вебхуков эквайринга и оформления возвратов.
-4. **[api/loyalty-service.yaml](file:///a:/laba_micro/api/loyalty-service.yaml)** — спецификация управления бонусными счетами, заморозки/списания баллов, правил рангов и маркетинговых акций.
-5. **[api/notification-service.yaml](file:///a:/laba_micro/api/notification-service.yaml)** — спецификация управления отправкой электронных билетов, шаблонов сообщений и персональных настроек каналов связи.
+1. **[api/catalog-service.yaml](api/catalog-service.yaml)** — спецификация каталога цирковых шоу, сеансов, схем секторов и внутренних проверок наличия мест.
+2. **[api/booking-service.yaml](api/booking-service.yaml)** — спецификация создания броней, удержания мест, получения билетов с QR-кодами и инициации возвратов.
+3. **[api/payment-service.yaml](api/payment-service.yaml)** — спецификация инициализации платежей, вебхуков эквайринга и оформления возвратов.
+4. **[api/loyalty-service.yaml](api/loyalty-service.yaml)** — спецификация управления бонусными счетами, заморозки/списания баллов, правил рангов и маркетинговых акций.
+5. **[api/notification-service.yaml](api/notification-service.yaml)** — спецификация управления отправкой электронных билетов, шаблонов сообщений и персональных настроек каналов связи.
