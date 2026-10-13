@@ -1,0 +1,686 @@
+openapi: 3.1.0
+info:
+  title: catalog-service
+  description: |
+    Сервис каталога цирковых представлений, афиши, расписания сеансов и схемы зрительного зала.
+    Является единственным источником истины для сущностей Show, Session, Hall, Genre.
+  version: 1.0.0
+servers:
+  - url: https://api.circus-theatre.ru
+    description: API Gateway
+paths:
+  /api/v1/shows:
+    get:
+      tags:
+        - shows
+      summary: Получить список цирковых шоу
+      description: Возвращает список цирковых представлений с фильтрацией по жанру, возрастному рейтингу и статусу.
+      operationId: getShows
+      parameters:
+        - name: genre
+          in: query
+          required: false
+          description: Фильтр по жанру представления
+          schema:
+            type: string
+            example: "Акробатика"
+        - name: ageRestriction
+          in: query
+          required: false
+          description: Максимальный возрастной рейтинг
+          schema:
+            type: integer
+            example: 6
+        - name: page
+          in: query
+          required: false
+          description: Номер страницы (начиная с 0)
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          required: false
+          description: Количество элементов на странице
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Успешный возврат списка представлений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShowPageResponse'
+        '400':
+          description: Некорректные параметры запроса
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/shows/{id}:
+    get:
+      tags:
+        - shows
+      summary: Получить детальную информацию о представлении
+      description: Возвращает подробную карточку циркового шоу с описанием, артистами и фотографиями.
+      operationId: getShowById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор шоу
+          schema:
+            type: integer
+            example: 42
+      responses:
+        '200':
+          description: Карточка шоу найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Show'
+        '404':
+          description: Шоу не найдено
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/sessions:
+    get:
+      tags:
+        - sessions
+      summary: Получить расписание сеансов
+      description: Возвращает список сеансов цирковых представлений с фильтрацией по диапазону дат и ID шоу.
+      operationId: getSessions
+      parameters:
+        - name: showId
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 42
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-11-01"
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-11-30"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Расписание сеансов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionPageResponse'
+
+  /api/v1/sessions/{id}:
+    get:
+      tags:
+        - sessions
+      summary: Получить информацию о сеансе и схему зала с ценами
+      description: Возвращает данные сеанса, базовую ценовую сетку по секторам манежа и информацию о зале.
+      operationId: getSessionById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 105
+      responses:
+        '200':
+          description: Детали сеанса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetail'
+        '404':
+          description: Сеанс не найден
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/sessions/{id}:
+    get:
+      tags:
+        - internal
+      summary: Внутренняя проверка доступности сеанса и базовой стоимости
+      description: Используется booking-service для валидации даты, статуса сеанса и базового прайса мест.
+      operationId: getInternalSessionVerification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 105
+      responses:
+        '200':
+          description: Данные сеанса для бронирования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalSessionVerificationResponse'
+        '404':
+          description: Сеанс не найден
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/shows:
+    post:
+      tags:
+        - internal
+      summary: Создать новое цирковое шоу (для администратора)
+      description: Публикует событие ShowCreated в Kafka.
+      operationId: createShow
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ идемпотентности запроса
+          schema:
+            type: string
+            format: uuid
+            example: "9a7f3402-23b9-4a9c-9c71-081829e1c251"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShowRequest'
+      responses:
+        '201':
+          description: Шоу успешно создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Show'
+        '400':
+          description: Ошибка валидации данных
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Шоу с таким названием уже существует
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/shows/{id}:
+    put:
+      tags:
+        - internal
+      summary: Обновить данные циркового шоу
+      description: Публикует событие ShowUpdated в Kafka.
+      operationId: updateShow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 42
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateShowRequest'
+      responses:
+        '200':
+          description: Шоу успешно обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Show'
+        '404':
+          description: Шоу не найдено
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    delete:
+      tags:
+        - internal
+      summary: Архивировать цирковое шоу
+      description: Снимает шоу с афиши и публикует событие ShowArchived в Kafka.
+      operationId: archiveShow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 42
+      responses:
+        '204':
+          description: Шоу успешно архивировано
+        '404':
+          description: Шоу не найдено
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+components:
+  schemas:
+    Show:
+      type: object
+      required:
+        - id
+        - title
+        - genre
+        - durationMinutes
+        - ageRestriction
+        - basePrice
+        - status
+      properties:
+        id:
+          type: integer
+          example: 42
+        title:
+          type: string
+          example: "Магия цирка: Полет над манежем"
+        description:
+          type: string
+          example: "Захватывающее цирковое представление с воздушными гимнастами, акробатами и иллюзионистами."
+        genre:
+          type: string
+          example: "Акробатика и иллюзия"
+        durationMinutes:
+          type: integer
+          example: 130
+        ageRestriction:
+          type: integer
+          example: 6
+        basePrice:
+          type: number
+          format: float
+          example: 1200.00
+        posterUrl:
+          type: string
+          format: uri
+          example: "https://cdn.circus-theatre.ru/posters/show_42.jpg"
+        status:
+          type: string
+          enum: [ACTIVE, ARCHIVED]
+          example: ACTIVE
+
+    ShowPageResponse:
+      type: object
+      required:
+        - items
+        - totalElements
+        - totalPages
+        - page
+        - size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Show'
+        totalElements:
+          type: integer
+          example: 24
+        totalPages:
+          type: integer
+          example: 3
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 10
+
+    Session:
+      type: object
+      required:
+        - id
+        - showId
+        - startTime
+        - endTime
+        - hallName
+        - status
+      properties:
+        id:
+          type: integer
+          example: 105
+        showId:
+          type: integer
+          example: 42
+        showTitle:
+          type: string
+          example: "Магия цирка: Полет над манежем"
+        startTime:
+          type: string
+          format: date-time
+          example: "2026-11-15T18:00:00Z"
+        endTime:
+          type: string
+          format: date-time
+          example: "2026-11-15T20:10:00Z"
+        hallName:
+          type: string
+          example: "Главный манеж"
+        status:
+          type: string
+          enum: [SCHEDULED, CANCELLED, COMPLETED]
+          example: SCHEDULED
+
+    SessionPageResponse:
+      type: object
+      required:
+        - items
+        - totalElements
+        - totalPages
+        - page
+        - size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+        totalElements:
+          type: integer
+          example: 45
+        totalPages:
+          type: integer
+          example: 3
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+
+    SessionDetail:
+      type: object
+      required:
+        - session
+        - pricingSectors
+      properties:
+        session:
+          $ref: '#/components/schemas/Session'
+        pricingSectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/PricingSector'
+
+    PricingSector:
+      type: object
+      required:
+        - sectorCode
+        - sectorName
+        - price
+      properties:
+        sectorCode:
+          type: string
+          example: "PARTERRE_A"
+        sectorName:
+          type: string
+          example: "Партер, сектор А (у манежа)"
+        price:
+          type: number
+          format: float
+          example: 2500.00
+
+    InternalSessionVerificationResponse:
+      type: object
+      required:
+        - sessionId
+        - showId
+        - isAvailableForBooking
+        - startTime
+        - sectorPrices
+      properties:
+        sessionId:
+          type: integer
+          example: 105
+        showId:
+          type: integer
+          example: 42
+        isAvailableForBooking:
+          type: boolean
+          example: true
+        startTime:
+          type: string
+          format: date-time
+          example: "2026-11-15T18:00:00Z"
+        sectorPrices:
+          type: object
+          additionalProperties:
+            type: number
+            format: float
+          example:
+            PARTERRE_A: 2500.00
+            PARTERRE_B: 2000.00
+            AMPHITHEATER: 1500.00
+            BALCONY: 1000.00
+
+    CreateShowRequest:
+      type: object
+      required:
+        - title
+        - genre
+        - durationMinutes
+        - ageRestriction
+        - basePrice
+      properties:
+        title:
+          type: string
+          example: "Магия цирка: Полет над манежем"
+        description:
+          type: string
+          example: "Грандиозная цирковая программа с дрессированными животными и трюками."
+        genre:
+          type: string
+          example: "Акробатика"
+        durationMinutes:
+          type: integer
+          minimum: 30
+          maximum: 240
+          example: 120
+        ageRestriction:
+          type: integer
+          minimum: 0
+          maximum: 18
+          example: 6
+        basePrice:
+          type: number
+          format: float
+          minimum: 100.0
+          example: 1200.00
+        posterUrl:
+          type: string
+          format: uri
+          example: "https://cdn.circus-theatre.ru/posters/show_42.jpg"
+
+    UpdateShowRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          example: "Магия цирка: Полет над манежем (Обновленная программа)"
+        description:
+          type: string
+          example: "Новые костюмы и премьерные акробатические номера."
+        genre:
+          type: string
+          example: "Акробатика и клоунада"
+        durationMinutes:
+          type: integer
+          example: 130
+        ageRestriction:
+          type: integer
+          example: 6
+        basePrice:
+          type: number
+          format: float
+          example: 1300.00
+        posterUrl:
+          type: string
+          format: uri
+          example: "https://cdn.circus-theatre.ru/posters/show_42_v2.jpg"
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://circus-theatre.ru/errors/not-found"
+        title:
+          type: string
+          example: "Resource Not Found"
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          example: "Цирковое представление с ID 42 не найдено."
+        instance:
+          type: string
+          example: "/api/v1/shows/42"
+
+    ShowCreatedEvent:
+      type: object
+      description: Событие публикации нового шоу. Топик circus.catalog.events, ключ showId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          example: "b1d03399-5ef8-4e1b-b4a0-f38f4be2db67"
+        eventType:
+          type: string
+          example: "catalog.show.created"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:00:00Z"
+        payload:
+          type: object
+          required:
+            - showId
+            - title
+            - genre
+            - basePrice
+          properties:
+            showId:
+              type: integer
+              example: 42
+            title:
+              type: string
+              example: "Магия цирка: Полет над манежем"
+            genre:
+              type: string
+              example: "Акробатика"
+            basePrice:
+              type: number
+              format: float
+              example: 1200.00
+
+    ShowUpdatedEvent:
+      type: object
+      description: Событие обновления информации о шоу. Топик circus.catalog.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "catalog.show.updated"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            showId:
+              type: integer
+            title:
+              type: string
+            basePrice:
+              type: number
+
+    ShowArchivedEvent:
+      type: object
+      description: Событие снятия шоу с репертуара. Топик circus.catalog.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "catalog.show.archived"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            showId:
+              type: integer

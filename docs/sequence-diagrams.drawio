@@ -1,0 +1,35 @@
+<mxfile host="app.diagrams.net" modified="2026-10-13T14:00:00.000Z" agent="Antigravity" version="24.0.0" type="device">
+  <diagram id="seq-success" name="1. Успешная покупка билета (Happy Path)">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="900">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <!-- Sequence lifelines -->
+        <mxCell id="ll_client" value="Клиент" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="40" width="100" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_gw" value="API Gateway" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="190" y="40" width="100" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_booking" value="booking-service" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_catalog" value="catalog-service" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="460" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_loyalty" value="loyalty-service" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="600" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_payment" value="payment-service" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="740" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_kafka" value="Apache Kafka" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="880" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ll_notif" value="notification" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="40" width="110" height="600" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

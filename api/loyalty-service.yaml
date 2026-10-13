@@ -1,0 +1,617 @@
+openapi: 3.1.0
+info:
+  title: loyalty-service
+  description: |
+    Сервис цирковой программы лояльности: начисление баллов (кэшбэк за билеты),
+    заморозка и списание баллов в счет скидки, управление уровнями зрителей
+    (Новичок, Ценитель цирка, Почётный зритель) и настройка маркетинговых правил.
+  version: 1.0.0
+servers:
+  - url: https://api.circus-theatre.ru
+    description: API Gateway
+paths:
+  /api/v1/loyalty/me:
+    get:
+      tags:
+        - loyalty
+      summary: Получить баланс баллов и статус лояльности зрителя
+      description: Возвращает текущее количество бонусов, активный уровень привилегий и процент кэшбэка.
+      operationId: getMyLoyaltyProfile
+      responses:
+        '200':
+          description: Профиль лояльности получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyProfileResponse'
+        '401':
+          description: Не авторизован
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/loyalty/tiers:
+    get:
+      tags:
+        - loyalty
+      summary: Получить справочник уровней привилегий
+      description: Описание условий перехода на новые ранги и коэффициенты начисления.
+      operationId: getLoyaltyTiers
+      responses:
+        '200':
+          description: Список уровней программы
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoyaltyTier'
+
+  /internal/v1/loyalty/reservations:
+    post:
+      tags:
+        - internal
+      summary: Временно зарезервировать баллы под заказ
+      description: |
+        Вызывается booking-service при создании брони. Блокирует указанное число баллов
+        на счету пользователя, чтобы исключить двойное расходование (double-spending).
+      operationId: reservePoints
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "553311aa-2244-6688-9900-aabbccddeeff"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservePointsRequest'
+      responses:
+        '201':
+          description: Баллы успешно заморожены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsReservationResponse'
+        '400':
+          description: Недостаточно доступных баллов для списания
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/loyalty/reservations/{reservationId}:
+    delete:
+      tags:
+        - internal
+      summary: Разморозить баллы (компенсирующее действие)
+      description: Вызывается booking-service при отмене брони, истечении 15-минутного таймера или ошибке оплаты.
+      operationId: cancelPointsReservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Зарезервированные баллы возвращены на баланс
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsReservationResponse'
+        '404':
+          description: Резерв не найден
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/loyalty/reservations/{reservationId}/confirm:
+    post:
+      tags:
+        - internal
+      summary: Подтвердить окончательное списание замороженных баллов
+      description: Вызывается после подтверждения оплаты заказа. Публикует событие PointsRedeemed в Kafka.
+      operationId: confirmPointsReservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Баллы успешно списаны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsReservationResponse'
+
+  /internal/v1/loyalty/accrual:
+    post:
+      tags:
+        - internal
+      summary: Начислить кэшбэк-баллы за оплаченный билет
+      description: |
+        Рассчитывает процент бонусов в соответствии с рангом зрителя и правилами маркетолога.
+        При достижении порога посещений повышает уровень зрителя.
+      operationId: accruePoints
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccruePointsRequest'
+      responses:
+        '200':
+          description: Баллы успешно начислены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccrualResultResponse'
+
+  /internal/v1/loyalty/penalty:
+    post:
+      tags:
+        - internal
+      summary: Применить штрафные санкции при возврате билета
+      description: Аннулирует начисленные баллы и снижает счетчик лояльности при отказе от посещения.
+      operationId: applyReturnPenalty
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PenaltyRequest'
+      responses:
+        '200':
+          description: Штраф применен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PenaltyResponse'
+
+  /api/v1/loyalty/rules:
+    get:
+      tags:
+        - marketing
+      summary: Получить список активных правил начисления
+      description: Доступно маркетологу для анализа действующих промо-механик.
+      operationId: getMarketingRules
+      responses:
+        '200':
+          description: Список маркетинговых правил
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarketingRule'
+
+    post:
+      tags:
+        - marketing
+      summary: Создать новое маркетинговое правило начисления баллов
+      description: Позволяет маркетологу стимулировать спрос на непопулярные шоу или сеансы.
+      operationId: createMarketingRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMarketingRuleRequest'
+      responses:
+        '201':
+          description: Правило успешно создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketingRule'
+
+components:
+  schemas:
+    LoyaltyProfileResponse:
+      type: object
+      required:
+        - userId
+        - activeBalance
+        - reservedBalance
+        - currentTier
+        - showsAttended
+        - nextTierThreshold
+      properties:
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        activeBalance:
+          type: integer
+          example: 450
+        reservedBalance:
+          type: integer
+          example: 0
+        currentTier:
+          type: string
+          example: "Знаток манежа"
+        cashbackPercent:
+          type: integer
+          example: 10
+        showsAttended:
+          type: integer
+          example: 5
+        nextTierThreshold:
+          type: integer
+          example: 10
+
+    LoyaltyTier:
+      type: object
+      required:
+        - tierCode
+        - tierName
+        - minShows
+        - cashbackPercent
+        - description
+      properties:
+        tierCode:
+          type: string
+          enum: [ROOKIE, CONNOISSEUR, HONORARY]
+          example: CONNOISSEUR
+        tierName:
+          type: string
+          example: "Знаток манежа"
+        minShows:
+          type: integer
+          example: 3
+        cashbackPercent:
+          type: integer
+          example: 10
+        description:
+          type: string
+          example: "10% кэшбэк баллами на все цирковые билеты и приоритетная бронь."
+
+    ReservePointsRequest:
+      type: object
+      required:
+        - bookingId
+        - userId
+        - pointsToReserve
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        pointsToReserve:
+          type: integer
+          minimum: 1
+          example: 300
+
+    PointsReservationResponse:
+      type: object
+      required:
+        - reservationId
+        - bookingId
+        - userId
+        - reservedPoints
+        - status
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+          example: "1f2e3d4c-5b6a-7980-ba09-fedcba987654"
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        reservedPoints:
+          type: integer
+          example: 300
+        status:
+          type: string
+          enum: [RESERVED, CONFIRMED, RELEASED]
+          example: RESERVED
+
+    AccruePointsRequest:
+      type: object
+      required:
+        - bookingId
+        - userId
+        - paidMoneyAmount
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        paidMoneyAmount:
+          type: number
+          format: float
+          example: 2200.00
+
+    AccrualResultResponse:
+      type: object
+      required:
+        - accruedPoints
+        - newBalance
+        - tierChanged
+      properties:
+        accruedPoints:
+          type: integer
+          example: 220
+        newBalance:
+          type: integer
+          example: 370
+        tierChanged:
+          type: boolean
+          example: false
+        currentTier:
+          type: string
+          example: "Знаток манежа"
+
+    PenaltyRequest:
+      type: object
+      required:
+        - bookingId
+        - userId
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+
+    PenaltyResponse:
+      type: object
+      required:
+        - deductedPoints
+        - updatedBalance
+        - penaltyApplied
+      properties:
+        deductedPoints:
+          type: integer
+          example: 220
+        updatedBalance:
+          type: integer
+          example: 150
+        penaltyApplied:
+          type: boolean
+          example: true
+
+    MarketingRule:
+      type: object
+      required:
+        - id
+        - name
+        - extraCashbackPercent
+        - isActive
+      properties:
+        id:
+          type: integer
+          example: 101
+        name:
+          type: string
+          example: "Двойные баллы на утренние семейные представления"
+        targetShowGenre:
+          type: string
+          example: "Клоунада"
+        extraCashbackPercent:
+          type: integer
+          example: 10
+        isActive:
+          type: boolean
+          example: true
+
+    CreateMarketingRuleRequest:
+      type: object
+      required:
+        - name
+        - extraCashbackPercent
+      properties:
+        name:
+          type: string
+          example: "Вечерняя пятничная премьера +500 бонусов"
+        extraCashbackPercent:
+          type: integer
+          example: 15
+        targetShowGenre:
+          type: string
+          example: "Иллюзия"
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://circus-theatre.ru/errors/insufficient-points"
+        title:
+          type: string
+          example: "Insufficient Loyalty Points"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "Запрошено 300 баллов, но доступный баланс составляет лишь 150 баллов."
+        instance:
+          type: string
+          example: "/internal/v1/loyalty/reservations"
+
+    PointsAccruedEvent:
+      type: object
+      description: Событие начисления бонусных баллов. Топик circus.loyalty.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "loyalty.points.accrued"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            userId:
+              type: string
+              format: uuid
+            bookingId:
+              type: string
+              format: uuid
+            pointsAdded:
+              type: integer
+            newBalance:
+              type: integer
+
+    PointsRedeemedEvent:
+      type: object
+      description: Событие списания бонусных баллов на скидку. Топик circus.loyalty.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "loyalty.points.redeemed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            userId:
+              type: string
+              format: uuid
+            bookingId:
+              type: string
+              format: uuid
+            pointsDeducted:
+              type: integer
+
+    TierUpgradedEvent:
+      type: object
+      description: Событие перехода зрителя на новый уровень привилегий цирка. Топик circus.loyalty.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "loyalty.tier.upgraded"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            userId:
+              type: string
+              format: uuid
+            oldTier:
+              type: string
+              example: "Новичок"
+            newTier:
+              type: string
+              example: "Знаток манежа"
+
+    PenaltyAppliedEvent:
+      type: object
+      description: Событие штрафа и понижения привилегий при возврате билета. Топик circus.loyalty.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "loyalty.penalty.applied"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            userId:
+              type: string
+              format: uuid
+            bookingId:
+              type: string
+              format: uuid
+            pointsDeducted:
+              type: integer

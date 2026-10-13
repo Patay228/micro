@@ -1,0 +1,675 @@
+openapi: 3.1.0
+info:
+  title: booking-service
+  description: |
+    Сервис бронирования билетов, временного удержания мест на цирковые представления (15 минут в Redis),
+    управления жизненным циклом электронных билетов и оформления возвратов (Сага-оркестрация).
+  version: 1.0.0
+servers:
+  - url: https://api.circus-theatre.ru
+    description: API Gateway
+paths:
+  /api/v1/bookings:
+    post:
+      tags:
+        - bookings
+      summary: Создать бронь и удержать места на 15 минут
+      description: |
+        Блокирует выбранные места в Redis на 15 минут, синхронно запрашивает сеанс у catalog-service,
+        резервирует скидочные баллы у loyalty-service и запрашивает платежную ссылку у payment-service.
+      operationId: createBooking
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ запроса (UUID) для предотвращения повторного создания заказа
+          schema:
+            type: string
+            format: uuid
+            example: "c7943d99-5283-4927-b50a-e5781a74288b"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Бронь успешно создана и ожидает оплаты
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '400':
+          description: Некорректные параметры (неверный формат мест или запрошенная сумма баллов превышает баланс)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Одно или несколько выбранных мест уже заняты или удерживаются другим зрителем
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '503':
+          description: Временная недоступность смежных сервисов (catalog или payment)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/bookings/{id}:
+    get:
+      tags:
+        - bookings
+      summary: Получить информацию о бронировании
+      description: Возвращает текущий статус брони, таймер истечения (expiresAt) или выпущенные билеты.
+      operationId: getBookingById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+      responses:
+        '200':
+          description: Данные бронирования
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '404':
+          description: Бронь не найдена
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/bookings/my:
+    get:
+      tags:
+        - bookings
+      summary: Список броней и билетов текущего зрителя
+      description: Возвращает историю заказов авторизованного зрителя (идентификатор берется из JWT токена).
+      operationId: getMyBookings
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED, REFUNDED]
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Список бронирований
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingPageResponse'
+
+  /api/v1/bookings/{id}/cancel:
+    post:
+      tags:
+        - bookings
+      summary: Отменить неоплаченную бронь
+      description: Снимает удержание мест в Redis и размораживает зарезервированные баллы в loyalty-service.
+      operationId: cancelBooking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+      responses:
+        '200':
+          description: Бронь успешно отменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '400':
+          description: Невозможно отменить бронь в текущем статусе (например, уже оплачена)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/bookings/{id}/refund:
+    post:
+      tags:
+        - bookings
+      summary: Запросить возврат билета
+      description: |
+        Инициирует процесс возврата билета. По правилам цирка возвращается до 50% стоимости.
+        Публикует событие TicketRefundRequested в Kafka.
+      operationId: requestTicketRefund
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '202':
+          description: Запрос на возврат принят в обработку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResponse'
+        '400':
+          description: Билет не подлежит возврату (сеанс уже начался или прошел)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/sessions/{sessionId}/seats/status:
+    get:
+      tags:
+        - internal
+      summary: Получить карту занятости мест на сеанс
+      description: Возвращает список проданных и временно удерживаемых мест (объединение данных PostgreSQL и Redis).
+      operationId: getSeatsStatus
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 105
+      responses:
+        '200':
+          description: Статус мест зала
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSeatsStatusResponse'
+
+  /internal/v1/bookings/{id}/expire:
+    post:
+      tags:
+        - internal
+      summary: Принудительно перевести бронь в статус EXPIRED (фоновый процесс)
+      description: Вызывается фоновым воркером по истечении 15-минутного таймера оплаты.
+      operationId: expireBooking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Бронь успешно переведена в статус истекшей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+
+components:
+  schemas:
+    SeatIdentifier:
+      type: object
+      required:
+        - sectorCode
+        - row
+        - seatNumber
+      properties:
+        sectorCode:
+          type: string
+          example: "PARTERRE_A"
+        row:
+          type: integer
+          example: 3
+        seatNumber:
+          type: integer
+          example: 12
+
+    CreateBookingRequest:
+      type: object
+      required:
+        - sessionId
+        - seats
+      properties:
+        sessionId:
+          type: integer
+          example: 105
+        seats:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/SeatIdentifier'
+        loyaltyPointsToRedeem:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 300
+          description: Количество баллов лояльности для частичной оплаты билетов (1 балл = 1 рубль)
+
+    BookingResponse:
+      type: object
+      required:
+        - id
+        - sessionId
+        - userId
+        - status
+        - totalPrice
+        - pointsDiscount
+        - payableAmount
+        - createdAt
+        - expiresAt
+        - seats
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        sessionId:
+          type: integer
+          example: 105
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        status:
+          type: string
+          enum: [PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED, REFUNDED]
+          example: PENDING_PAYMENT
+        totalPrice:
+          type: number
+          format: float
+          example: 2500.00
+        pointsDiscount:
+          type: number
+          format: float
+          example: 300.00
+        payableAmount:
+          type: number
+          format: float
+          example: 2200.00
+        paymentUrl:
+          type: string
+          format: uri
+          example: "https://pay.bank-acquiring.ru/process?tx=9a4d1e2c-6b7f-4a08"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:00:00Z"
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:15:00Z"
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatIdentifier'
+        tickets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ticket'
+
+    Ticket:
+      type: object
+      required:
+        - ticketNumber
+        - sectorCode
+        - row
+        - seatNumber
+        - price
+        - qrCodeUrl
+      properties:
+        ticketNumber:
+          type: string
+          example: "CRK-20261115-105-0312"
+        sectorCode:
+          type: string
+          example: "PARTERRE_A"
+        row:
+          type: integer
+          example: 3
+        seatNumber:
+          type: integer
+          example: 12
+        price:
+          type: number
+          format: float
+          example: 2500.00
+        qrCodeUrl:
+          type: string
+          format: uri
+          example: "https://cdn.circus-theatre.ru/qrcodes/CRK-20261115-105-0312.png"
+
+    BookingPageResponse:
+      type: object
+      required:
+        - items
+        - totalElements
+        - page
+        - size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingResponse'
+        totalElements:
+          type: integer
+          example: 8
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 10
+
+    RefundRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          example: "Не могу посетить шоу по личным обстоятельствам"
+
+    RefundResponse:
+      type: object
+      required:
+        - bookingId
+        - refundStatus
+        - refundAmount
+        - penaltyPercent
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        refundStatus:
+          type: string
+          enum: [REQUESTED, PROCESSED, REJECTED]
+          example: REQUESTED
+        refundAmount:
+          type: number
+          format: float
+          example: 1100.00
+        penaltyPercent:
+          type: integer
+          example: 50
+
+    SessionSeatsStatusResponse:
+      type: object
+      required:
+        - sessionId
+        - occupiedSeats
+        - heldSeats
+      properties:
+        sessionId:
+          type: integer
+          example: 105
+        occupiedSeats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatIdentifier'
+        heldSeats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatIdentifier'
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://circus-theatre.ru/errors/conflict"
+        title:
+          type: string
+          example: "Seat Conflict"
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+          example: "Место Ряд 3, Место 12 в секторе PARTERRE_A уже забронировано другим зрителем."
+        instance:
+          type: string
+          example: "/api/v1/bookings"
+
+    BookingCreatedEvent:
+      type: object
+      description: Событие создания бронирования. Топик circus.bookings.events, ключ bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "booking.created"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            bookingId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+              format: uuid
+            sessionId:
+              type: integer
+            payableAmount:
+              type: number
+            pointsDiscount:
+              type: number
+
+    BookingConfirmedEvent:
+      type: object
+      description: Событие подтверждения бронирования после успешной оплаты. Топик circus.bookings.events, ключ bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          example: "a8f3b4c1-192e-4371-8bc4-1029384756ab"
+        eventType:
+          type: string
+          example: "booking.confirmed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:05:00Z"
+        payload:
+          type: object
+          required:
+            - bookingId
+            - userId
+            - sessionId
+            - totalAmount
+            - ticketsCount
+            - tickets
+          properties:
+            bookingId:
+              type: string
+              format: uuid
+              example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+            userId:
+              type: string
+              format: uuid
+              example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+            sessionId:
+              type: integer
+              example: 105
+            totalAmount:
+              type: number
+              format: float
+              example: 2200.00
+            ticketsCount:
+              type: integer
+              example: 1
+            tickets:
+              type: array
+              items:
+                $ref: '#/components/schemas/Ticket'
+
+    BookingExpiredEvent:
+      type: object
+      description: Событие истечения времени оплаты брони (15 минут). Топик circus.bookings.events, ключ bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "booking.expired"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            bookingId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+              format: uuid
+            reservedLoyaltyPoints:
+              type: integer
+
+    BookingCancelledEvent:
+      type: object
+      description: Событие отмены бронирования (вручную клиентом или из-за отказа оплаты). Топик circus.bookings.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "booking.cancelled"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            bookingId:
+              type: string
+              format: uuid
+            reason:
+              type: string
+
+    TicketRefundRequestedEvent:
+      type: object
+      description: Событие запроса на возврат билета. Топик circus.refunds.events, ключ bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "refund.requested"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          required:
+            - bookingId
+            - userId
+            - refundAmount
+            - penaltyPercent
+          properties:
+            bookingId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+              format: uuid
+            refundAmount:
+              type: number
+              format: float
+              example: 1100.00
+            penaltyPercent:
+              type: integer
+              example: 50

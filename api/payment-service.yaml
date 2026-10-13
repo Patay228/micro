@@ -1,0 +1,476 @@
+openapi: 3.1.0
+info:
+  title: payment-service
+  description: |
+    Сервис приёма платежей за билеты, интеграции с внешним банковским эквайрингом (карты, СБП),
+    фискализации чеков и проведения возвратов денежных средств.
+    Является единственным источником истины для сущностей Payment, Refund, Receipt.
+  version: 1.0.0
+servers:
+  - url: https://api.circus-theatre.ru
+    description: API Gateway
+paths:
+  /internal/v1/payments:
+    post:
+      tags:
+        - internal
+      summary: Создать платёжную транзакцию
+      description: |
+        Вызывается booking-service для инициализации платежа. Формирует сессию в банковском эквайринге
+        и возвращает ссылку paymentUrl для перенаправления клиента.
+      operationId: createPayment
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ запроса (UUID) для предотвращения дублирования списаний
+          schema:
+            type: string
+            format: uuid
+            example: "e5a31a98-d102-4fc4-8071-70bfb76a0841"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Платеж успешно инициирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          description: Некорректные параметры платежа
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '502':
+          description: Ошибка связи со шлюзом банковского эквайринга
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/payments/{id}:
+    get:
+      tags:
+        - internal
+      summary: Получить информацию о платеже
+      description: Проверка текущего статуса оплаты, суммы и чека.
+      operationId: getPaymentById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310"
+      responses:
+        '200':
+          description: Данные платежа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          description: Платеж не найден
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/payments/{id}/refund:
+    post:
+      tags:
+        - internal
+      summary: Выполнить возврат денежных средств
+      description: |
+        Инициирует возврат денег на карту плательщика (50% при возврате билета зрителем
+        или 100% при запоздалой оплате истекшей брони).
+      operationId: processRefund
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessRefundRequest'
+      responses:
+        '200':
+          description: Возврат успешно инициирован в банке
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResultResponse'
+        '400':
+          description: Сумма возврата превышает сумму первоначального платежа
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Платеж не найден
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/payments/webhooks/acquiring:
+    post:
+      tags:
+        - webhooks
+      summary: Вебхук обратного вызова от платёжного шлюза банка
+      description: |
+        Принимает уведомление от банка о статусе платежа (успех / отказ).
+        Проверяет криптографическую подпись и публикует событие PaymentCompleted или PaymentFailed в Kafka.
+      operationId: handleAcquiringWebhook
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: HMAC SHA-256 цифровая подпись шлюза
+          schema:
+            type: string
+            example: "d2f3a4...89ab"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcquiringWebhookPayload'
+      responses:
+        '200':
+          description: Вебхук успешно обработан
+        '401':
+          description: Недействительная цифровая подпись
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+components:
+  schemas:
+    CreatePaymentRequest:
+      type: object
+      required:
+        - bookingId
+        - userId
+        - amount
+        - currency
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        amount:
+          type: number
+          format: float
+          minimum: 0.01
+          example: 2200.00
+        currency:
+          type: string
+          enum: [RUB]
+          default: RUB
+        description:
+          type: string
+          example: "Оплата билетов в цирк: Шоу 'Магия цирка'"
+
+    PaymentResponse:
+      type: object
+      required:
+        - id
+        - bookingId
+        - amount
+        - currency
+        - status
+        - paymentUrl
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310"
+        bookingId:
+          type: string
+          format: uuid
+          example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+        amount:
+          type: number
+          format: float
+          example: 2200.00
+        currency:
+          type: string
+          example: RUB
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED, REFUNDED, PARTIALLY_REFUNDED]
+          example: PENDING
+        paymentUrl:
+          type: string
+          format: uri
+          example: "https://pay.bank-acquiring.ru/process?tx=9a4d1e2c-6b7f-4a08"
+        receiptUrl:
+          type: string
+          format: uri
+          example: "https://receipts.ofd.ru/check/9a4d1e2c"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:00:05Z"
+
+    ProcessRefundRequest:
+      type: object
+      required:
+        - refundAmount
+        - reason
+      properties:
+        refundAmount:
+          type: number
+          format: float
+          minimum: 1.00
+          example: 1100.00
+        reason:
+          type: string
+          example: "Возврат 50% стоимости циркового билета зрителю"
+
+    RefundResultResponse:
+      type: object
+      required:
+        - refundId
+        - paymentId
+        - refundedAmount
+        - status
+        - processedAt
+      properties:
+        refundId:
+          type: string
+          format: uuid
+          example: "7c1e92d0-3a55-4e78-9a64-219d38ef5031"
+        paymentId:
+          type: string
+          format: uuid
+          example: "b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310"
+        refundedAmount:
+          type: number
+          format: float
+          example: 1100.00
+        status:
+          type: string
+          enum: [COMPLETED, PENDING]
+          example: COMPLETED
+        processedAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:30:00Z"
+
+    AcquiringWebhookPayload:
+      type: object
+      required:
+        - externalTransactionId
+        - internalPaymentId
+        - status
+        - amount
+      properties:
+        externalTransactionId:
+          type: string
+          example: "BANK_TX_987410294"
+        internalPaymentId:
+          type: string
+          format: uuid
+          example: "b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310"
+        status:
+          type: string
+          enum: [SUCCESS, FAIL]
+          example: SUCCESS
+        amount:
+          type: number
+          format: float
+          example: 2200.00
+        failureReason:
+          type: string
+          example: "Insufficient funds"
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://circus-theatre.ru/errors/bad-gateway"
+        title:
+          type: string
+          example: "Acquiring Gateway Failure"
+        status:
+          type: integer
+          example: 502
+        detail:
+          type: string
+          example: "Внешний шлюз банка временно недоступен."
+        instance:
+          type: string
+          example: "/internal/v1/payments"
+
+    PaymentCompletedEvent:
+      type: object
+      description: |
+        Событие успешной оплаты билетов. Публикуется в топик circus.payments.events с ключом bookingId,
+        чтобы гарантировать строгую очередность обработки для конкретного заказа.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          example: "3f6c2b0e-8d1a-4c57-9e2f-5a1b7c9d0e44"
+        eventType:
+          type: string
+          example: "payment.completed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:04:12Z"
+        payload:
+          type: object
+          required:
+            - paymentId
+            - bookingId
+            - userId
+            - amount
+            - currency
+          properties:
+            paymentId:
+              type: string
+              format: uuid
+              example: "b2e0c7f4-1a93-4f0d-8c6e-7d25a1e9f310"
+            bookingId:
+              type: string
+              format: uuid
+              example: "9a4d1e2c-6b7f-4a08-b3c5-0e1f2d3c4b5a"
+            userId:
+              type: string
+              format: uuid
+              example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+            amount:
+              type: number
+              format: float
+              example: 2200.00
+            currency:
+              type: string
+              example: RUB
+
+    PaymentFailedEvent:
+      type: object
+      description: Событие отказа в оплате банком. Топик circus.payments.events с ключом bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          example: "e2c3b4a5-9988-7766-5544-33221100aabb"
+        eventType:
+          type: string
+          example: "payment.failed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:04:30Z"
+        payload:
+          type: object
+          required:
+            - paymentId
+            - bookingId
+            - reason
+          properties:
+            paymentId:
+              type: string
+              format: uuid
+            bookingId:
+              type: string
+              format: uuid
+            reason:
+              type: string
+              example: "Лимит по карте превышен или недостаточно средств"
+
+    RefundCompletedEvent:
+      type: object
+      description: Событие успешного возврата денег банком. Топик circus.refunds.events с ключом bookingId.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "refund.completed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          required:
+            - refundId
+            - paymentId
+            - bookingId
+            - refundedAmount
+          properties:
+            refundId:
+              type: string
+              format: uuid
+            paymentId:
+              type: string
+              format: uuid
+            bookingId:
+              type: string
+              format: uuid
+            refundedAmount:
+              type: number
+              format: float
+              example: 1100.00

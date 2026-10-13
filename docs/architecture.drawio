@@ -1,0 +1,85 @@
+<mxfile host="app.diagrams.net" modified="2026-10-13T14:00:00.000Z" agent="Antigravity" version="24.0.0" type="device">
+  <diagram id="circus-arch" name="Архитектура цирковой микросервисной системы">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Clients -->
+        <mxCell id="client" value="Клиент: Веб-сайт и Мобильное приложение&#xa;(Зрители, Администраторы, Маркетологи)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5fe;strokeColor=#0288d1;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="460" y="30" width="360" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- API Gateway -->
+        <mxCell id="gateway" value="API Gateway (Spring Cloud Gateway)&#xa;Маршрутизация /api/v1/*, Rate Limiting, Проверка JWT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1976d2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="460" y="140" width="360" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Keycloak -->
+        <mxCell id="keycloak" value="Keycloak (IAM)&#xa;OAuth 2.0 / OpenID Connect&#xa;Аутентификация и токены" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#616161;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="140" width="200" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Services -->
+        <mxCell id="catalog" value="catalog-service&#xa;Афиша, программы, сеансы, цены&#xa;PostgreSQL + Redis (кэш)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#388e3c;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="220" height="85" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="booking" value="booking-service&#xa;Бронь мест (15 мин), билеты, сага&#xa;PostgreSQL + Redis (hold)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#f57c00;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="270" width="240" height="85" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="loyalty" value="loyalty-service&#xa;Баллы, ранги, скидки, правила&#xa;PostgreSQL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#7b1fa2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="620" y="270" width="220" height="85" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="payment" value="payment-service&#xa;Платежи, эквайринг, чеки, возвраты&#xa;PostgreSQL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2f1;strokeColor=#00796b;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="270" width="230" height="85" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="notification" value="notification-service&#xa;Билеты с QR, email/SMS оповещения&#xa;MongoDB (шаблоны и история)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#c2185b;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="620" width="310" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Broker Kafka -->
+        <mxCell id="kafka" value="Apache Kafka (Брокер сообщений)&#xa;Топики: circus.payments.events, circus.bookings.events, circus.refunds.events, circus.loyalty.events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#455a64;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="140" y="460" width="1000" height="65" as="geometry" />
+        </mxCell>
+        
+        <!-- External Systems -->
+        <mxCell id="bank" value="Банковский эквайринг&#xa;(Платёжный шлюз: карты, СБП)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#efebe9;strokeColor=#5d4037;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1190" y="270" width="180" height="85" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sms_email" value="SMS / Email Провайдер&#xa;(Внешний транспорт)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#efebe9;strokeColor=#5d4037;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="870" y="620" width="180" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Edges -->
+        <mxCell id="e_client_gw" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;entryX=0.5;entryY=0;strokeWidth=2;" edge="1" source="client" target="gateway" parent="1" />
+        <mxCell id="e_gw_keycloak" value="проверка JWT" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1;" edge="1" source="gateway" target="keycloak" parent="1" />
+        
+        <mxCell id="e_gw_catalog" value="GET /api/v1/shows, sessions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="gateway" target="catalog" parent="1" />
+        <mxCell id="e_gw_booking" value="POST /api/v1/bookings" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="gateway" target="booking" parent="1" />
+        <mxCell id="e_gw_loyalty" value="GET /api/v1/loyalty/me" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="gateway" target="loyalty" parent="1" />
+        
+        <mxCell id="e_booking_catalog" value="GET /internal/v1/sessions/{id}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="booking" target="catalog" parent="1" />
+        <mxCell id="e_booking_loyalty" value="POST /internal/v1/loyalty/reservations" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="booking" target="loyalty" parent="1" />
+        <mxCell id="e_booking_payment" value="POST /internal/v1/payments" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="booking" target="payment" parent="1" />
+        
+        <mxCell id="e_payment_bank" value="REST API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="payment" target="bank" parent="1" />
+        <mxCell id="e_bank_payment" value="Webhook" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="bank" target="payment" parent="1" />
+        
+        <mxCell id="e_payment_kafka" value="payment.completed, payment.failed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="payment" target="kafka" parent="1" />
+        <mxCell id="e_kafka_booking" value="payment.completed, payment.failed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="kafka" target="booking" parent="1" />
+        
+        <mxCell id="e_booking_kafka" value="booking.confirmed, booking.expired, refund.requested" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="booking" target="kafka" parent="1" />
+        <mxCell id="e_kafka_loyalty" value="booking.confirmed, refund.requested" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="kafka" target="loyalty" parent="1" />
+        <mxCell id="e_loyalty_kafka" value="loyalty.tier.upgraded, loyalty.points.accrued" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="loyalty" target="kafka" parent="1" />
+        
+        <mxCell id="e_kafka_notif" value="booking.confirmed, booking.expired, refund.completed, loyalty.tier.upgraded" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;dashed=1;" edge="1" source="kafka" target="notification" parent="1" />
+        <mxCell id="e_notif_ext" value="Отправка билетов" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=1.5;" edge="1" source="notification" target="sms_email" parent="1" />
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

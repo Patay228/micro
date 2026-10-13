@@ -1,0 +1,445 @@
+openapi: 3.1.0
+info:
+  title: notification-service
+  description: |
+    Сервис отправки сервисных и маркетинговых сообщений зрителям цирка:
+    электронные билеты с QR-кодами, подтверждения оплаты, квитанции возврата,
+    напоминания о сеансе, оповещения об истечении брони и изменении уровня лояльности.
+    Хранит шаблоны и журнал отправок в документоориентированной БД MongoDB.
+  version: 1.0.0
+servers:
+  - url: https://api.circus-theatre.ru
+    description: API Gateway
+paths:
+  /api/v1/notifications/my:
+    get:
+      tags:
+        - notifications
+      summary: Получить историю уведомлений текущего зрителя
+      description: Возвращает отправленные пользователю сообщения (email, SMS, push) с пагинацией.
+      operationId: getMyNotifications
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Список уведомлений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationHistoryPageResponse'
+
+  /api/v1/notifications/preferences:
+    put:
+      tags:
+        - notifications
+      summary: Настроить каналы и типы получаемых уведомлений
+      description: Управление подписками на SMS, email и маркетинговые предложения.
+      operationId: updateNotificationPreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Настройки успешно сохранены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+
+  /internal/v1/notifications/send:
+    post:
+      tags:
+        - internal
+      summary: Прямая транзакционная отправка уведомления
+      description: Используется другими сервисами для срочной отправки (например, одноразовый пароль или экстренная отмена сеанса).
+      operationId: sendDirectNotification
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "99887766-5544-3322-1100-aabbccddeeff"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+      responses:
+        '202':
+          description: Сообщение поставлено в очередь отправки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDispatchResponse'
+        '400':
+          description: Некорректный получатель или шаблон
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /internal/v1/notifications/templates:
+    get:
+      tags:
+        - internal
+      summary: Список шаблонов уведомлений
+      description: Возвращает шаблоны писем и SMS с описанием подстановочных параметров.
+      operationId: getTemplates
+      responses:
+        '200':
+          description: Список шаблонов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationTemplate'
+
+  /internal/v1/notifications/marketing/broadcast:
+    post:
+      tags:
+        - marketing
+      summary: Запустить таргетированную маркетинговую рассылку
+      description: Вызывается маркетологом для стимуляции спроса на представления со слабой заполняемостью зала.
+      operationId: sendMarketingBroadcast
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastRequest'
+      responses:
+        '202':
+          description: Рассылка запущена в фоновую обработку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcastResponse'
+
+components:
+  schemas:
+    NotificationRecord:
+      type: object
+      required:
+        - id
+        - userId
+        - channel
+        - title
+        - body
+        - deliveryStatus
+        - sentAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+        userId:
+          type: string
+          format: uuid
+          example: "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+        channel:
+          type: string
+          enum: [EMAIL, SMS, PUSH]
+          example: EMAIL
+        title:
+          type: string
+          example: "Ваши билеты на цирковое представление 'Магия цирка'"
+        body:
+          type: string
+          example: "Поздравляем с покупкой! Ваши электронные билеты с QR-кодом во вложении."
+        deliveryStatus:
+          type: string
+          enum: [SENT, DELIVERED, FAILED]
+          example: DELIVERED
+        sentAt:
+          type: string
+          format: date-time
+          example: "2026-10-13T12:05:30Z"
+
+    NotificationHistoryPageResponse:
+      type: object
+      required:
+        - items
+        - totalElements
+        - page
+        - size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRecord'
+        totalElements:
+          type: integer
+          example: 12
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 10
+
+    NotificationPreferences:
+      type: object
+      required:
+        - emailEnabled
+        - smsEnabled
+        - marketingAllowed
+      properties:
+        email:
+          type: string
+          format: email
+          example: "viewer@circus.ru"
+        phone:
+          type: string
+          example: "+79991234567"
+        emailEnabled:
+          type: boolean
+          example: true
+        smsEnabled:
+          type: boolean
+          example: true
+        marketingAllowed:
+          type: boolean
+          example: false
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        emailEnabled:
+          type: boolean
+          example: true
+        smsEnabled:
+          type: boolean
+          example: false
+        marketingAllowed:
+          type: boolean
+          example: true
+
+    SendNotificationRequest:
+      type: object
+      required:
+        - recipient
+        - channel
+        - templateCode
+        - parameters
+      properties:
+        recipient:
+          type: string
+          example: "viewer@circus.ru"
+        channel:
+          type: string
+          enum: [EMAIL, SMS, PUSH]
+          example: EMAIL
+        templateCode:
+          type: string
+          example: "TICKET_CONFIRMATION"
+        parameters:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            showTitle: "Магия цирка"
+            sessionDate: "15 ноября 2026, 18:00"
+            ticketsCount: "2"
+
+    NotificationDispatchResponse:
+      type: object
+      required:
+        - dispatchId
+        - status
+      properties:
+        dispatchId:
+          type: string
+          format: uuid
+          example: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
+        status:
+          type: string
+          enum: [QUEUED, PROCESSING]
+          example: QUEUED
+
+    NotificationTemplate:
+      type: object
+      required:
+        - code
+        - title
+        - channel
+        - bodyTemplate
+      properties:
+        code:
+          type: string
+          example: "BOOKING_EXPIRED"
+        title:
+          type: string
+          example: "Время бронирования истекло"
+        channel:
+          type: string
+          enum: [EMAIL, SMS]
+          example: EMAIL
+        bodyTemplate:
+          type: string
+          example: "Здравствуйте! Время оплаты брони на сеанс {showTitle} истекло. Места вернулись в продажу."
+
+    BroadcastRequest:
+      type: object
+      required:
+        - title
+        - message
+        - channel
+        - audienceFilter
+      properties:
+        title:
+          type: string
+          example: "Скидка 20% на премьерное цирковое шоу в эту субботу!"
+        message:
+          type: string
+          example: "Только для зрителей нашего цирка: используйте промокод CIRCUS20."
+        channel:
+          type: string
+          enum: [EMAIL, SMS, PUSH]
+          example: EMAIL
+        audienceFilter:
+          type: object
+          properties:
+            targetGenre:
+              type: string
+              example: "Клоунада"
+            minLoyaltyTier:
+              type: string
+              example: "CONNOISSEUR"
+
+    BroadcastResponse:
+      type: object
+      required:
+        - campaignId
+        - estimatedRecipients
+        - status
+      properties:
+        campaignId:
+          type: string
+          format: uuid
+          example: "f1e2d3c4-b5a6-9788-0011-223344556677"
+        estimatedRecipients:
+          type: integer
+          example: 450
+        status:
+          type: string
+          example: "QUEUED"
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://circus-theatre.ru/errors/validation"
+        title:
+          type: string
+          example: "Invalid Recipient Format"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "Указанный номер телефона не соответствует международному формату E.164."
+        instance:
+          type: string
+          example: "/internal/v1/notifications/send"
+
+    NotificationDispatchedEvent:
+      type: object
+      description: Событие успешной доставки уведомления внешним провайдером. Топик circus.notifications.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "notification.dispatched"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            notificationId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+              format: uuid
+            channel:
+              type: string
+            deliveredAt:
+              type: string
+              format: date-time
+
+    NotificationFailedEvent:
+      type: object
+      description: Событие сбоя отправки уведомления провайдером. Топик circus.notifications.events.
+      required:
+        - eventId
+        - eventType
+        - schemaVersion
+        - occurredAt
+        - payload
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          example: "notification.failed"
+        schemaVersion:
+          type: integer
+          example: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          properties:
+            notificationId:
+              type: string
+              format: uuid
+            recipient:
+              type: string
+            errorMessage:
+              type: string
