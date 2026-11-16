@@ -138,6 +138,9 @@ func (h *Handler) HandleWebhook(c *gin.Context) {
 	}
 
 	p, err := h.repo.GetPaymentByID(payload.InternalPaymentID)
+	if err == nil && p == nil {
+		p, err = h.repo.GetPaymentByBookingID(payload.InternalPaymentID)
+	}
 	if err != nil || p == nil {
 		common.RenderProblem(c, http.StatusNotFound, "Payment Not Found", "Указанный платёж не существует", c.Request.URL.Path)
 		return

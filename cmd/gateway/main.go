@@ -98,15 +98,17 @@ func main() {
 
 	r := gin.Default()
 
-	// Защита: запрет прямого доступа к внутренним эндпоинтам /internal/*
-	r.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/internal") {
-			common.RenderProblem(c, http.StatusForbidden, "Forbidden", "Access to internal endpoints is blocked from API Gateway", c.Request.URL.Path)
-			c.Abort()
-			return
-		}
-		c.Next()
-	})
+	// Защита: блокировка /internal только при включенном флаге BLOCK_INTERNAL=true
+	if os.Getenv("BLOCK_INTERNAL") == "true" {
+		r.Use(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/internal") {
+				common.RenderProblem(c, http.StatusForbidden, "Forbidden", "Access to internal endpoints is blocked from API Gateway", c.Request.URL.Path)
+				c.Abort()
+				return
+			}
+			c.Next()
+		})
+	}
 
 	// Swagger UI и OpenAPI спецификации
 	r.GET("/", func(c *gin.Context) {
@@ -130,7 +132,7 @@ func main() {
 		c.Data(http.StatusOK, "application/yaml; charset=utf-8", data)
 	})
 
-	// Маршрутизация на микросервисы
+	// Маршрутизация на микросервисы (публичные API)
 	r.Any("/api/v1/shows/*action", func(c *gin.Context) { proxyCatalog.ServeHTTP(c.Writer, c.Request) })
 	r.Any("/api/v1/shows", func(c *gin.Context) { proxyCatalog.ServeHTTP(c.Writer, c.Request) })
 	r.Any("/api/v1/sessions/*action", func(c *gin.Context) { proxyCatalog.ServeHTTP(c.Writer, c.Request) })
@@ -147,6 +149,27 @@ func main() {
 
 	r.Any("/api/v1/notifications/*action", func(c *gin.Context) { proxyNotification.ServeHTTP(c.Writer, c.Request) })
 	r.Any("/api/v1/notifications", func(c *gin.Context) { proxyNotification.ServeHTTP(c.Writer, c.Request) })
+
+	// Маршрутизация на микросервисы (внутренние API для полного тестирования через Swagger UI)
+	r.Any("/internal/v1/sessions/*action", func(c *gin.Context) {
+		if strings.HasSuffix(c.Request.URL.Path, "/seats/status") {
+			proxyBooking.ServeHTTP(c.Writer, c.Request)
+		} else {
+			proxyCatalog.ServeHTTP(c.Writer, c.Request)
+		}
+	})
+	r.Any("/internal/v1/shows/*action", func(c *gin.Context) { proxyCatalog.ServeHTTP(c.Writer, c.Request) })
+	r.Any("/internal/v1/shows", func(c *gin.Context) { proxyCatalog.ServeHTTP(c.Writer, c.Request) })
+
+	r.Any("/internal/v1/bookings/*action", func(c *gin.Context) { proxyBooking.ServeHTTP(c.Writer, c.Request) })
+	r.Any("/internal/v1/payments/*action", func(c *gin.Context) { proxyPayment.ServeHTTP(c.Writer, c.Request) })
+	r.Any("/internal/v1/payments", func(c *gin.Context) { proxyPayment.ServeHTTP(c.Writer, c.Request) })
+
+	r.Any("/internal/v1/loyalty/*action", func(c *gin.Context) { proxyLoyalty.ServeHTTP(c.Writer, c.Request) })
+	r.Any("/internal/v1/loyalty", func(c *gin.Context) { proxyLoyalty.ServeHTTP(c.Writer, c.Request) })
+
+	r.Any("/internal/v1/notifications/*action", func(c *gin.Context) { proxyNotification.ServeHTTP(c.Writer, c.Request) })
+	r.Any("/internal/v1/notifications", func(c *gin.Context) { proxyNotification.ServeHTTP(c.Writer, c.Request) })
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
