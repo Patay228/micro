@@ -324,3 +324,94 @@
 3. **[api/payment-service.yaml](api/payment-service.yaml)** — спецификация инициализации платежей, вебхуков эквайринга и оформления возвратов.
 4. **[api/loyalty-service.yaml](api/loyalty-service.yaml)** — спецификация управления бонусными счетами, заморозки/списания баллов, правил рангов и маркетинговых акций.
 5. **[api/notification-service.yaml](api/notification-service.yaml)** — спецификация управления отправкой электронных билетов, шаблонов сообщений и персональных настроек каналов связи.
+
+
+---
+
+# Лабораторная работа №4. Реализация микросервисов
+
+**Тема:** Программная реализация микросервисной системы цирка на языке Go (Golang)  
+**Технологический стек:**
+* **Язык программирования:** Go 1.25
+* **Веб-фреймворк:** Gin (`github.com/gin-gonic/gin`)
+* **База данных:** PostgreSQL 16 (`github.com/lib/pq`) с чистыми SQL-запросами без ORM (`db.Query`, `db.Exec`, `tx.Begin/Commit/Rollback`)
+* **Миграции:** SQL-миграции в стиле `golang-migrate` (`migrations/*.up.sql` и `migrations/*.down.sql`)
+* **Брокер сообщений:** RabbitMQ (`github.com/rabbitmq/amqp091-go`) с topic-exchange `circus.exchange` и автоматическим In-Memory Event Bus fallback для автономного запуска и тестов.
+
+---
+
+## 7. Реализованные микросервисы
+
+В рамках лабораторной работы №4 полностью реализованы **все 5 бизнес-сервисов** и **API Gateway**:
+
+1. **`gateway-service` (`cmd/gateway/main.go`, порт 8000):**
+   * Единая точка входа для клиентских запросов (`/api/v1/*`).
+   * Проксирование запросов на внутренние микросервисы с помощью `httputil.ReverseProxy`.
+   * Защита контура: блокирует прямой клиентский доступ к служебным эндпоинтам `/internal/*` (HTTP 403 Forbidden RFC 7807).
+2. **`catalog-service` (`cmd/catalog/main.go`, порт 8001):**
+   * Управление афишей цирка, сеансами и ценами по секторам зала.
+   * Эндпоинты: `GET /api/v1/shows`, `GET /api/v1/shows/:id`, `GET /api/v1/sessions`, `GET /api/v1/sessions/:id`, `GET /internal/v1/sessions/:id`, `POST /internal/v1/shows`.
+   * Публикация событий `catalog.show.created`, `catalog.show.archived`.
+3. **`booking-service` (`cmd/booking/main.go`, порт 8002):**
+   * Ядро системы и **Оркестратор распределённой Саги**.
+   * Временное удержание мест (Seat Hold) на 15 минут, выпуск билетов с уникальными номерами и QR-кодами, обработка возвратов.
+   * Эндпоинты: `POST /api/v1/bookings` (с `Idempotency-Key`), `GET /api/v1/bookings/:id`, `GET /api/v1/bookings/my`, `POST /api/v1/bookings/:id/refund`, `GET /internal/v1/sessions/:sessionId/seats/status`, `POST /internal/v1/bookings/:id/expire`.
+   * Консьюмит события `payment.completed`, `payment.failed`; публикует `booking.confirmed`, `booking.expired`, `booking.cancelled`, `refund.requested`.
+4. **`payment-service` (`cmd/payment/main.go`, порт 8003):**
+   * Проведение платежей, генерация ссылок на банковскую форму, обработка возвратов.
+   * Эндпоинты: `POST /internal/v1/payments` (с `Idempotency-Key`), `GET /internal/v1/payments/:id`, `POST /internal/v1/payments/:id/refund`, `POST /api/v1/payments/webhooks/acquiring` (вебхук эквайринга).
+   * Публикует события `payment.completed`, `payment.failed`, `refund.completed`.
+5. **`loyalty-service` (`cmd/loyalty/main.go`, порт 8004):**
+   * Бонусные счета зрителей, двухфазная работа с баллами (заморозка `RESERVED` $\to$ окончательное списание `CONFIRMED` или разморозка `RELEASED`), начисление 10% кэшбэка за оплаченные билеты, расчет уровней («Новичок», «Знаток манежа», «Почётный зритель»).
+   * Эндпоинты: `GET /api/v1/loyalty/me`, `GET /api/v1/loyalty/tiers`, `POST /internal/v1/loyalty/reservations`, `DELETE /internal/v1/loyalty/reservations/:id` (компенсация), `POST /internal/v1/loyalty/accrual`.
+   * Консьюмит `booking.confirmed`, `refund.requested`; публикует `loyalty.points.accrued`, `loyalty.points.redeemed`, `loyalty.tier.upgraded`.
+6. **`notification-service` (`cmd/notification/main.go`, порт 8005):**
+   * Доставка электронных билетов с QR-кодами, напоминаний и чеков возврата зрителям на Email и SMS.
+   * Эндпоинты: `GET /api/v1/notifications/my`, `PUT /api/v1/notifications/preferences`, `POST /internal/v1/notifications/send`.
+   * Консьюмит `booking.confirmed`, `booking.expired`, `refund.completed`, `loyalty.tier.upgraded`.
+
+---
+
+## 8. Реализация взаимодействий и моков
+
+| Взаимодействие | Тип | Реализация | Роль в системе |
+| :--- | :---: | :--- | :--- |
+| **Клиент → API Gateway** | `sync` | Реальный HTTP REST (`:8000`) | Точка входа, валидация маршрутов |
+| **booking → catalog** | `sync` | Реальный HTTP REST (`/internal/v1/sessions/:id`) | Синхронная проверка сеанса и базовой стоимости места |
+| **booking → loyalty** | `sync` | Реальный HTTP REST (`/internal/v1/loyalty/reservations`) | Заморозка баллов под заказ (компенсация: `DELETE`) |
+| **booking → payment** | `sync` | Реальный HTTP REST (`/internal/v1/payments`) | Создание платежа на сумму за вычетом бонусов |
+| **Банк → payment (Webhook)** | `sync` | **Мок банка** (`mocks/bank_mock.go`) | Имитация ответов банковского эквайринга (`SUCCESS` / `FAIL`) |
+| **payment → брокер сообщений** | `async` | RabbitMQ / In-Memory EventBus | Публикация событий оплаты |
+| **брокер → booking / loyalty / notification** | `async` | RabbitMQ / In-Memory EventBus | Консьюминг событий и выполнение шагов Саги |
+| **notification → SMS/Email** | `async` | **Мок транспорта** (`mocks/sms_mock.go`) | Имитация физической отправки писем и SMS |
+
+---
+
+## 9. Инструкция по запуску и тестированию
+
+### Вариант 1. Запуск демонстрационного сквозного сценария (1 команда)
+Скрипт автономно запускает все микросервисы, симулирует действия пользователя, работу банка и брокера, проверяя Happy Path, сбои, компенсации и идемпотентность:
+```bash
+go run run_demo.go
+```
+
+### Вариант 2. Запуск unit- и интеграционных тестов
+```bash
+go test -v ./test/...
+```
+Все тесты (Happy path саги, сбои и компенсации, идемпотентность `Idempotency-Key`, коллизии мест с форматом RFC 7807 `ProblemDetails`, моки) проходят со статусом `PASS`.
+
+### Вариант 3. Запуск всей системы в Docker Compose (PostgreSQL + RabbitMQ + Services)
+```bash
+docker compose up --build -d
+```
+После запуска доступны:
+* **API Gateway:** `http://localhost:8000`
+* **RabbitMQ Management UI:** `http://localhost:15672` (логин/пароль: `guest` / `guest`)
+* **PostgreSQL:** `localhost:5432` (`circus_db`)
+
+Коллекция запросов для Postman находится в:
+* `postman/circus_microservices_lab4.postman_collection.json`
+
+Подробное пошаговое описание сценариев со структурой JSON-запросов и ответов:
+* `docs/demo-scenarios.md`

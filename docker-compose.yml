@@ -1,0 +1,157 @@
+version: '3.8'
+
+services:
+  # Инфраструктура: Брокер сообщений RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: circus-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP протокол
+      - "15672:15672"  # Веб-панель управления (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Инфраструктура: СУБД PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: circus-postgres
+    environment:
+      POSTGRES_USER: circus_user
+      POSTGRES_PASSWORD: circus_password
+      POSTGRES_DB: circus_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U circus_user -d circus_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 1. API Gateway (Единая точка входа для клиентов)
+  gateway:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: gateway
+    container_name: circus-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - CATALOG_URL=http://catalog:8001
+      - BOOKING_URL=http://booking:8002
+      - PAYMENT_URL=http://payment:8003
+      - LOYALTY_URL=http://loyalty:8004
+      - NOTIFICATION_URL=http://notification:8005
+    depends_on:
+      - catalog
+      - booking
+      - payment
+      - loyalty
+      - notification
+
+  # 2. catalog-service
+  catalog:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: catalog
+    container_name: circus-catalog
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 3. booking-service (Saga Orchestrator)
+  booking:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: booking
+    container_name: circus-booking
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+      - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - CATALOG_URL=http://catalog:8001
+      - PAYMENT_URL=http://payment:8003
+      - LOYALTY_URL=http://loyalty:8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 4. payment-service
+  payment:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: payment
+    container_name: circus-payment
+    ports:
+      - "8003:8003"
+    environment:
+      - PORT=8003
+      - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 5. loyalty-service
+  loyalty:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: loyalty
+    container_name: circus-loyalty
+    ports:
+      - "8004:8004"
+    environment:
+      - PORT=8004
+      - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 6. notification-service
+  notification:
+    build:
+      context: .
+      args:
+        SERVICE_NAME: notification
+    container_name: circus-notification
+    ports:
+      - "8005:8005"
+    environment:
+      - PORT=8005
+      - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:

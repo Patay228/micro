@@ -1,0 +1,295 @@
+{
+  "info": {
+    "name": "Цирк: Лабораторная работа №4 (Микросервисы на Go)",
+    "description": "Коллекция запросов к API Gateway (http://localhost:8000) для демонстрации всех микросервисов, сквозного сценария покупки билетов и сага-компенсаций.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "userId",
+      "value": "45a8b9e1-12c4-4b56-8e12-32049e210a55"
+    },
+    {
+      "key": "bookingId",
+      "value": ""
+    },
+    {
+      "key": "paymentId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Каталог (catalog-service)",
+      "item": [
+        {
+          "name": "Получить афишу цирка (GET /api/v1/shows)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/shows?page=0&size=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "shows"],
+              "query": [
+                {"key": "page", "value": "0"},
+                {"key": "size", "value": "10"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Детальная карточка шоу (GET /api/v1/shows/42)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/shows/42",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "shows", "42"]
+            }
+          }
+        },
+        {
+          "name": "Расписание сеансов (GET /api/v1/sessions)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions?showId=42",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "sessions"],
+              "query": [{"key": "showId", "value": "42"}]
+            }
+          }
+        },
+        {
+          "name": "Сеанс и тарифная сетка зала (GET /api/v1/sessions/105)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/105",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "sessions", "105"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Лояльность (loyalty-service)",
+      "item": [
+        {
+          "name": "Мой баланс и уровень (GET /api/v1/loyalty/me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "X-User-Id", "value": "{{userId}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loyalty/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loyalty", "me"]
+            }
+          }
+        },
+        {
+          "name": "Справочник уровней привилегий (GET /api/v1/loyalty/tiers)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loyalty/tiers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loyalty", "tiers"]
+            }
+          }
+        },
+        {
+          "name": "Маркетинговые правила (GET /api/v1/loyalty/rules)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loyalty/rules",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loyalty", "rules"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Бронирование и Сага (booking-service)",
+      "item": [
+        {
+          "name": "Создать бронь (Happy Path с бонусами)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set('bookingId', jsonData.id);",
+                  "if (jsonData.paymentUrl) {",
+                  "    var urlParts = jsonData.paymentUrl.split('tx=');",
+                  "    if (urlParts.length > 1) { pm.collectionVariables.set('paymentId', urlParts[1]); }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-User-Id", "value": "{{userId}}"},
+              {"key": "Idempotency-Key", "value": "a1b2c3d4-e5f6-7a8b-9c0d-e1f2a3b4c5d6"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": 105,\n  \"seats\": [\n    {\n      \"sectorCode\": \"PARTERRE_A\",\n      \"row\": 3,\n      \"seatNumber\": 12\n    }\n  ],\n  \"loyaltyPointsToRedeem\": 300\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          }
+        },
+        {
+          "name": "Получить бронь по ID (GET /api/v1/bookings/:id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{bookingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "bookings", "{{bookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "Мои бронирования и билеты (GET /api/v1/bookings/my)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "X-User-Id", "value": "{{userId}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/my",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "bookings", "my"]
+            }
+          }
+        },
+        {
+          "name": "Запросить возврат билета (POST /api/v1/bookings/:id/refund)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-User-Id", "value": "{{userId}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Не могу посетить цирк по личным обстоятельствам\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/bookings/{{bookingId}}/refund",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "bookings", "{{bookingId}}", "refund"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Оплата (payment-service)",
+      "item": [
+        {
+          "name": "Эмуляция вебхука банка: УСПЕХ (POST /api/v1/payments/webhooks/acquiring)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-Signature", "mock_signature_valid"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalTransactionId\": \"BANK_TX_987654\",\n  \"internalPaymentId\": \"{{paymentId}}\",\n  \"status\": \"SUCCESS\",\n  \"amount\": 2200.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/webhooks/acquiring",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "payments", "webhooks", "acquiring"]
+            }
+          }
+        },
+        {
+          "name": "Эмуляция вебхука банка: ОТКАЗ (POST /api/v1/payments/webhooks/acquiring)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-Signature", "mock_signature_valid"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalTransactionId\": \"BANK_TX_FAIL_112\",\n  \"internalPaymentId\": \"{{paymentId}}\",\n  \"status\": \"FAIL\",\n  \"failureReason\": \"Недостаточно средств на счете\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/webhooks/acquiring",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "payments", "webhooks", "acquiring"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Уведомления (notification-service)",
+      "item": [
+        {
+          "name": "История моих уведомлений и билетов (GET /api/v1/notifications/my)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "X-User-Id", "value": "{{userId}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/my",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "notifications", "my"]
+            }
+          }
+        },
+        {
+          "name": "Обновить настройки каналов связи (PUT /api/v1/notifications/preferences)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-User-Id", "value": "{{userId}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"viewer@circus.ru\",\n  \"phone\": \"+79991234567\",\n  \"emailEnabled\": true,\n  \"smsEnabled\": true,\n  \"marketingAllowed\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/preferences",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "notifications", "preferences"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+-- 000003_payment.up.sql
+CREATE TABLE IF NOT EXISTS payments (
+    id VARCHAR(64) PRIMARY KEY,
+    booking_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL,
+    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    payment_url TEXT NOT NULL,
+    receipt_url TEXT,
+    idempotency_key VARCHAR(64) UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS payment_refunds (
+    id VARCHAR(64) PRIMARY KEY,
+    payment_id VARCHAR(64) NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+    booking_id VARCHAR(64) NOT NULL,
+    amount NUMERIC(10, 2) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'COMPLETED',
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
