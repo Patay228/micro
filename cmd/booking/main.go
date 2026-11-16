@@ -30,6 +30,11 @@ func main() {
 	}
 
 	saga := booking.NewSagaCoordinator(repo, broker)
+	rdb := common.InitRedisClient("booking-service")
+	if rdb != nil {
+		saga.SetRedisClient(rdb)
+		defer rdb.Close()
+	}
 	handler := booking.NewHandler(repo, saga, broker)
 
 	r := gin.Default()

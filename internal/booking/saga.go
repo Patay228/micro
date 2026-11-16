@@ -13,11 +13,13 @@ import (
 	"circus-microservices/internal/common"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 type SagaCoordinator struct {
 	repo       Repository
 	broker     *common.Broker
+	rdb        *redis.Client
 	catalogURL string
 	paymentURL string
 	loyaltyURL string
@@ -46,6 +48,10 @@ func NewSagaCoordinator(repo Repository, broker *common.Broker) *SagaCoordinator
 		loyaltyURL: loyURL,
 		httpClient: &http.Client{Timeout: 3 * time.Second},
 	}
+}
+
+func (s *SagaCoordinator) SetRedisClient(rdb *redis.Client) {
+	s.rdb = rdb
 }
 
 // CheckSession запрашивает сеанс и базовые цены у catalog-service (синхронно по REST).
@@ -194,6 +200,17 @@ func (s *SagaCoordinator) ExecuteBookingSaga(userID string, req CreateBookingReq
 	// Шаг 2 Саги: Удержание мест (Seat Hold) в хранилище на 15 минут
 	if err := s.repo.HoldSeats(req.SessionID, bookingID, req.Seats, expiresAt); err != nil {
 		return nil, fmt.Errorf("conflict: %w", err)
+	}
+
+	// Атомарное удержание мест в Redis (SETNX с TTL 15 минут)
+	if s.rdb != nil {
+		for _, seat := range req.Seats {
+			ok, err := common.HoldSeatInRedis(s.rdb, req.SessionID, seat.SectorCode, seat.Row, seat.SeatNumber, bookingID, 15*time.Minute)
+			if err != nil || !ok {
+				_ = s.repo.ReleaseSeats(bookingID)
+				return nil, fmt.Errorf("conflict: seat %s row %d seat %d held in Redis", seat.SectorCode, seat.Row, seat.SeatNumber)
+			}
+		}
 	}
 
 	// Шаг 3 Саги: Заморозка баллов лояльности (если запрошено списание)

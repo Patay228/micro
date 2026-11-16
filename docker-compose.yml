@@ -32,6 +32,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # Инфраструктура: Redis (Кэш афиши и блокировки мест SETNX с TTL 15 минут)
+  redis:
+    image: redis:7-alpine
+    container_name: circus-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # 1. API Gateway (Единая точка входа для клиентов)
   gateway:
     build:
@@ -68,10 +80,13 @@ services:
       - PORT=8001
       - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis:6379
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # 3. booking-service (Saga Orchestrator)
@@ -87,6 +102,7 @@ services:
       - PORT=8002
       - DATABASE_URL=postgres://circus_user:circus_password@postgres:5432/circus_db?sslmode=disable
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis:6379
       - CATALOG_URL=http://catalog:8001
       - PAYMENT_URL=http://payment:8003
       - LOYALTY_URL=http://loyalty:8004
@@ -94,6 +110,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # 4. payment-service
