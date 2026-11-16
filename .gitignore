@@ -10,6 +10,8 @@ bin/
 *.test
 *.out
 
-# OS specific
+# OS & IDE specific
 .DS_Store
 Thumbs.db
+.idea/
+*.iml
