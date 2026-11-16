@@ -16,6 +16,7 @@ RUN apk --no-cache add ca-certificates curl
 WORKDIR /root/
 COPY --from=builder /app/service .
 COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/api ./api
 
 EXPOSE 8000 8001 8002 8003 8004 8005
 

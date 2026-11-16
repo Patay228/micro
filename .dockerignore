@@ -1,0 +1,6 @@
+.git
+.idea
+*.exe
+*.test
+*.out
+bin/

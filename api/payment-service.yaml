@@ -7,8 +7,10 @@ info:
     Является единственным источником истины для сущностей Payment, Refund, Receipt.
   version: 1.0.0
 servers:
+  - url: /
+    description: API Gateway (Текущий хост / Localhost)
   - url: https://api.circus-theatre.ru
-    description: API Gateway
+    description: Production API Gateway
 paths:
   /internal/v1/payments:
     post:

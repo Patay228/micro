@@ -401,16 +401,20 @@ go test -v ./test/...
 ```
 Все тесты (Happy path саги, сбои и компенсации, идемпотентность `Idempotency-Key`, коллизии мест с форматом RFC 7807 `ProblemDetails`, моки) проходят со статусом `PASS`.
 
-### Вариант 3. Запуск всей системы в Docker Compose (PostgreSQL + RabbitMQ + Services)
+### Вариант 3. Запуск всей системы в Docker Compose (PostgreSQL + RabbitMQ + Redis + Services)
 ```bash
 docker compose up --build -d
 ```
 После запуска доступны:
+* **Интерактивная документация Swagger UI:** [http://localhost:8000/swagger](http://localhost:8000/swagger) (или `/docs`)
+  * Позволяет тестировать API всех 5 микросервисов прямо из браузера (кнопка «Try it out»).
+  * В правом верхнем углу доступен выпадающий список выбора спецификаций сервисов (Catalog, Booking, Payment, Loyalty, Notification).
 * **API Gateway:** `http://localhost:8000`
 * **RabbitMQ Management UI:** `http://localhost:15672` (логин/пароль: `guest` / `guest`)
+* **Redis:** `localhost:6379`
 * **PostgreSQL:** `localhost:5432` (`circus_db`)
 
-Коллекция запросов для Postman находится в:
+Коллекция запросов для Postman также сохранена в репозитории:
 * `postman/circus_microservices_lab4.postman_collection.json`
 
 Подробное пошаговое описание сценариев со структурой JSON-запросов и ответов:
