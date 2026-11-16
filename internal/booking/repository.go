@@ -15,6 +15,8 @@ type Repository interface {
 	GetBookingByIdempotencyKey(key string) (*BookingResponse, error)
 	GetBookingsByUserID(userID string, status string) ([]BookingResponse, error)
 	UpdateBookingStatus(id string, status string) error
+	UpdateBookingPaymentDetails(id string, paymentURL string, pointsDiscount, payableAmount float64) error
+	DeleteBooking(id string) error
 	HoldSeats(sessionID int, bookingID string, seats []SeatIdentifier, expiresAt time.Time) error
 	ReleaseSeats(bookingID string) error
 	ConfirmSeatsAndCreateTickets(b *BookingResponse) ([]Ticket, error)
@@ -142,6 +144,17 @@ func (r *PostgresRepository) GetBookingsByUserID(userID string, status string) (
 
 func (r *PostgresRepository) UpdateBookingStatus(id string, status string) error {
 	_, err := r.db.Exec("UPDATE bookings SET status = $1 WHERE id = $2", status, id)
+	return err
+}
+
+func (r *PostgresRepository) UpdateBookingPaymentDetails(id string, paymentURL string, pointsDiscount, payableAmount float64) error {
+	_, err := r.db.Exec(`UPDATE bookings SET payment_url = $1, points_discount = $2, payable_amount = $3 WHERE id = $4`,
+		paymentURL, pointsDiscount, payableAmount, id)
+	return err
+}
+
+func (r *PostgresRepository) DeleteBooking(id string) error {
+	_, err := r.db.Exec("DELETE FROM bookings WHERE id = $1", id)
 	return err
 }
 
@@ -374,6 +387,32 @@ func (m *InMemoryRepository) UpdateBookingStatus(id string, status string) error
 	}
 	b.Status = status
 	m.bookings[id] = b
+	return nil
+}
+
+func (m *InMemoryRepository) UpdateBookingPaymentDetails(id string, paymentURL string, pointsDiscount, payableAmount float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.bookings[id]
+	if !ok {
+		return fmt.Errorf("booking not found")
+	}
+	b.PaymentURL = paymentURL
+	b.PointsDiscount = pointsDiscount
+	b.PayableAmount = payableAmount
+	m.bookings[id] = b
+	return nil
+}
+
+func (m *InMemoryRepository) DeleteBooking(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.bookings, id)
+	for k, v := range m.idempotency {
+		if v == id {
+			delete(m.idempotency, k)
+		}
+	}
 	return nil
 }
 

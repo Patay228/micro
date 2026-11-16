@@ -197,8 +197,31 @@ func (s *SagaCoordinator) ExecuteBookingSaga(userID string, req CreateBookingReq
 		totalPrice += price
 	}
 
-	// Шаг 2 Саги: Удержание мест (Seat Hold) в хранилище на 15 минут
+	// Шаг 2 Саги: Создаем предварительную запись брони (для валидации внешних ключей seat_holds -> bookings)
+	bResp := BookingResponse{
+		ID:             bookingID,
+		SessionID:      req.SessionID,
+		UserID:         userID,
+		Status:         "PENDING_PAYMENT",
+		TotalPrice:     totalPrice,
+		PointsDiscount: 0,
+		PayableAmount:  totalPrice,
+		CreatedAt:      now.Format(time.RFC3339),
+		ExpiresAt:      expiresAt.Format(time.RFC3339),
+		Seats:          req.Seats,
+	}
+
+	saved, isRetry, err := s.repo.CreateBooking(bResp, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if isRetry {
+		return saved, nil
+	}
+
+	// Шаг 3 Саги: Удержание мест (Seat Hold) в хранилище на 15 минут
 	if err := s.repo.HoldSeats(req.SessionID, bookingID, req.Seats, expiresAt); err != nil {
+		_ = s.repo.DeleteBooking(bookingID)
 		return nil, fmt.Errorf("conflict: %w", err)
 	}
 
@@ -208,12 +231,13 @@ func (s *SagaCoordinator) ExecuteBookingSaga(userID string, req CreateBookingReq
 			ok, err := common.HoldSeatInRedis(s.rdb, req.SessionID, seat.SectorCode, seat.Row, seat.SeatNumber, bookingID, 15*time.Minute)
 			if err != nil || !ok {
 				_ = s.repo.ReleaseSeats(bookingID)
+				_ = s.repo.DeleteBooking(bookingID)
 				return nil, fmt.Errorf("conflict: seat %s row %d seat %d held in Redis", seat.SectorCode, seat.Row, seat.SeatNumber)
 			}
 		}
 	}
 
-	// Шаг 3 Саги: Заморозка баллов лояльности (если запрошено списание)
+	// Шаг 4 Саги: Заморозка баллов лояльности (если запрошено списание)
 	pointsDiscount := float64(req.LoyaltyPointsToRedeem)
 	if pointsDiscount > totalPrice {
 		pointsDiscount = totalPrice
@@ -222,15 +246,16 @@ func (s *SagaCoordinator) ExecuteBookingSaga(userID string, req CreateBookingReq
 	if req.LoyaltyPointsToRedeem > 0 {
 		resID, err := s.ReserveLoyaltyPoints(bookingID, userID, int(pointsDiscount))
 		if err != nil {
-			// СБОЙ: Откатываем шаг 2 (компенсация - снимаем удержание мест)
+			// СБОЙ: Откатываем удержание мест и удаляем черновик
 			_ = s.repo.ReleaseSeats(bookingID)
+			_ = s.repo.DeleteBooking(bookingID)
 			log.Printf("[booking-service] [SAGA ROLLBACK] Points reservation failed, released seat hold")
 			return nil, fmt.Errorf("loyalty reservation error: %w", err)
 		}
 		reservationID = resID
 	}
 
-	// Шаг 4 Саги: Инициализация платежа в payment-service
+	// Шаг 5 Саги: Инициализация платежа в payment-service
 	payableAmount := totalPrice - pointsDiscount
 	if payableAmount <= 0 {
 		payableAmount = 1.00 // минимальная сумма банковской проводки
@@ -241,34 +266,22 @@ func (s *SagaCoordinator) ExecuteBookingSaga(userID string, req CreateBookingReq
 		// СБОЙ: Компенсируем и баллы, и места!
 		_ = s.repo.ReleaseSeats(bookingID)
 		_ = s.CompensateLoyaltyPoints(reservationID)
+		_ = s.repo.DeleteBooking(bookingID)
 		log.Printf("[booking-service] [SAGA ROLLBACK] Payment creation failed, released seats and loyalty points")
 		return nil, fmt.Errorf("payment service error: %w", err)
 	}
 
-	// Шаг 5 Саги: Сохранение брони в статусе PENDING_PAYMENT
-	bResp := BookingResponse{
-		ID:             bookingID,
-		SessionID:      req.SessionID,
-		UserID:         userID,
-		Status:         "PENDING_PAYMENT",
-		TotalPrice:     totalPrice,
-		PointsDiscount: pointsDiscount,
-		PayableAmount:  payableAmount,
-		PaymentURL:     paymentURL,
-		CreatedAt:      now.Format(time.RFC3339),
-		ExpiresAt:      expiresAt.Format(time.RFC3339),
-		Seats:          req.Seats,
-	}
-
-	saved, isRetry, err := s.repo.CreateBooking(bResp, idempotencyKey)
-	if err != nil {
+	// Обновляем платежные реквизиты брони
+	if err := s.repo.UpdateBookingPaymentDetails(bookingID, paymentURL, pointsDiscount, payableAmount); err != nil {
 		_ = s.repo.ReleaseSeats(bookingID)
 		_ = s.CompensateLoyaltyPoints(reservationID)
+		_ = s.repo.DeleteBooking(bookingID)
 		return nil, err
 	}
-	if isRetry {
-		return saved, nil
-	}
+
+	saved.PaymentURL = paymentURL
+	saved.PointsDiscount = pointsDiscount
+	saved.PayableAmount = payableAmount
 
 	// Публикация события о создании брони
 	_ = s.broker.Publish("circus.bookings.events", common.NewEvent("booking.created", map[string]any{

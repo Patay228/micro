@@ -41,6 +41,7 @@ type TestEnv struct {
 }
 
 func setupTestEnvironment() *TestEnv {
+	os.Setenv("FORCE_IN_MEMORY", "true")
 	bus := common.GetGlobalInMemoryBus()
 	bus.Clear()
 
